@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Admin - JSON Host</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --txt:#e8eaf0; --mut:#8b92a5; --acc:#5b8cff; --red:#e5484d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,sans-serif; }
+  .wrap { max-width:960px; margin:0 auto; padding:30px 20px; }
+  .card { background:var(--card); border-radius:10px; padding:18px; }
+  input, textarea { width:100%; background:#0f1115; color:var(--txt); border:1px solid #2a2f3a; border-radius:6px; padding:10px; margin:6px 0 12px; font:inherit; }
+  textarea { font-family:monospace; min-height:260px; resize:vertical; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:9px 14px; cursor:pointer; margin-right:6px; }
+  button.sec { background:#2a2f3a; } button.del { background:var(--red); }
+  #login { max-width:340px; margin:12vh auto; }
+  #panel { display:none; }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
+  .grid { display:grid; grid-template-columns:260px 1fr; gap:16px; }
+  @media (max-width:720px) { .grid { grid-template-columns:1fr; } }
+  .row { padding:10px; border-radius:6px; cursor:pointer; }
+  .row:hover, .row.on { background:#232834; } .row small { color:var(--mut); display:block; font-family:monospace; }
+  #msg { color:var(--red); min-height:20px; margin-top:8px; } #msg.ok { color:#3dd68c; }
+  label.chk { display:flex; gap:8px; align-items:center; margin-bottom:12px; } label.chk input { width:auto; margin:0; }
+</style>
+</head>
+<body>
+<div id="login" class="card">
+  <h2>Área administrativa</h2>
+  <label>Usuário<input id="user" autocomplete="username"></label>
+  <label>Senha<input id="pass" type="password" autocomplete="current-password"></label>
+  <button id="btnLogin">Entrar</button>
+  <div id="lmsg" style="color:var(--red);margin-top:8px"></div>
+</div>
+
+<div id="panel" class="wrap">
+  <div class="top"><h2 style="margin:0">Painel</h2><button class="sec" id="btnLogout">Sair</button></div>
+  <div class="card" style="margin-bottom:16px">
+    <strong>Textos do site público</strong>
+    <label>Título do site<input id="siteTitle"></label>
+    <label>Subtítulo<input id="siteSubtitle"></label>
+    <button id="btnSettings">Salvar textos</button> <span id="smsg" style="color:#3dd68c"></span>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <button id="btnNew" style="width:100%;margin-bottom:10px">+ Novo JSON</button>
+      <div id="list"></div>
+    </div>
+    <div class="card">
+      <label>Título<input id="title"></label>
+      <label>Slug (endereço: /j/slug)<input id="slug" placeholder="meu-arquivo"></label>
+      <label>Conteúdo JSON<textarea id="content" spellcheck="false">{}</textarea></label>
+      <label class="chk"><input type="checkbox" id="pub"> Listar na página pública</label>
+      <button id="btnSave">Salvar</button>
+      <button class="sec" id="btnFmt">Formatar</button>
+      <button class="sec" id="btnCopy">Copiar link</button>
+      <button class="del" id="btnDel">Excluir</button>
+      <div id="msg"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let items = [], current = null; // current = slug em edição
+
+async function api(url, method = 'GET', body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Erro');
+  return data;
+}
+function msg(t, ok) { $('msg').textContent = t; $('msg').className = ok ? 'ok' : ''; }
+
+async function init() {
+  const { auth } = await api('/admin/api/me');
+  $('login').style.display = auth ? 'none' : 'block';
+  $('panel').style.display = auth ? 'block' : 'none';
+  if (auth) { load(); const st = await api('/admin/api/settings'); $('siteTitle').value = st.siteTitle; $('siteSubtitle').value = st.siteSubtitle; }
+}
+async function load() { items = await api('/admin/api/items'); render(); }
+
+function render() {
+  const list = $('list'); list.textContent = '';
+  items.forEach((i) => {
+    const d = document.createElement('div'); d.className = 'row' + (i.slug === current ? ' on' : '');
+    const t = document.createElement('div'); t.textContent = i.title;
+    const s = document.createElement('small'); s.textContent = '/j/' + i.slug + (i.public ? ' · público' : '');
+    d.append(t, s); d.onclick = () => edit(i.slug); list.append(d);
+  });
+}
+function edit(slug) {
+  const i = items.find((x) => x.slug === slug); if (!i) return;
+  current = slug;
+  $('title').value = i.title; $('slug').value = i.slug; $('content').value = i.content; $('pub').checked = i.public;
+  msg(''); render();
+}
+function clearForm() {
+  current = null; $('title').value = ''; $('slug').value = ''; $('content').value = '{}'; $('pub').checked = false; msg(''); render();
+}
+
+$('btnLogin').onclick = async () => {
+  try { await api('/admin/api/login', 'POST', { user: $('user').value, pass: $('pass').value }); $('pass').value = ''; init(); }
+  catch (e) { $('lmsg').textContent = e.message; }
+};
+$('pass').addEventListener('keydown', (e) => e.key === 'Enter' && $('btnLogin').click());
+$('btnLogout').onclick = async () => { await api('/admin/api/logout', 'POST'); init(); };
+$('btnNew').onclick = clearForm;
+$('btnSettings').onclick = async () => {
+  try { await api('/admin/api/settings', 'PUT', { siteTitle: $('siteTitle').value, siteSubtitle: $('siteSubtitle').value }); $('smsg').textContent = 'Salvo!'; }
+  catch (e) { $('smsg').textContent = e.message; }
+  setTimeout(() => $('smsg').textContent = '', 2000);
+};
+$('btnFmt').onclick = () => {
+  try { $('content').value = JSON.stringify(JSON.parse($('content').value), null, 2); msg(''); }
+  catch (e) { msg('JSON inválido: ' + e.message); }
+};
+$('btnSave').onclick = async () => {
+  const body = { title: $('title').value.trim(), slug: $('slug').value.trim(), content: $('content').value, public: $('pub').checked };
+  try {
+    if (current) await api('/admin/api/items/' + encodeURIComponent(current), 'PUT', body);
+    else await api('/admin/api/items', 'POST', body);
+    current = body.slug; await load(); msg('Salvo!', true);
+  } catch (e) { msg(e.message); }
+};
+$('btnDel').onclick = async () => {
+  if (!current || !confirm('Excluir este JSON?')) return;
+  await api('/admin/api/items/' + encodeURIComponent(current), 'DELETE'); clearForm(); load();
+};
+$('btnCopy').onclick = () => {
+  if (!current) return msg('Salve primeiro.');
+  navigator.clipboard.writeText(location.origin + '/j/' + current); msg('Link copiado!', true);
+};
+init();
+</script>
+</body>
+</html>
